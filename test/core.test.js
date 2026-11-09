@@ -7,7 +7,8 @@ import { FDM, objective } from '../js/fdm.js';
 import { interpolateBSpline, evalBSpline, chainMembers } from '../js/splines.js';
 import { sizeMembers, DEFAULT_MATERIAL } from '../js/sizing.js';
 import { writeIGES } from '../js/iges.js';
-import { runPipeline, exportIGES, exportCSV, exportJSON } from '../js/pipeline.js';
+import { runPipeline, exportIGES, exportCSV, exportJSON, exportSkinOBJ } from '../js/pipeline.js';
+import { skinStress } from '../js/shell.js';
 import { Frame, sizeSection, ribStress } from '../js/frame.js';
 import { exampleMesh, exampleNetwork, supportsAt } from './fixtures.js';
 
@@ -276,3 +277,74 @@ test('pipeline (ribs): nodes stay on the surface, stresses within limit, exports
   const j = JSON.parse(exportJSON(r));
   assert.equal(j.members.length, r.stats.members); assert.ok(j.members[0].depth >= 1 && j.curves[0].depths.length === j.curves[0].nodes.length);
 });
+
+// square plate of skin triangles with negligible ribs along the edges
+function plateModel(nx, a, restrain) {
+  const n1 = nx + 1, nodes = new Float64Array(3 * n1 * n1), normals = new Float64Array(3 * n1 * n1), fixed = new Uint8Array(n1 * n1), tris = [];
+  for (let j = 0; j < n1; j++) for (let i = 0; i < n1; i++) { const k = j * n1 + i; nodes[3 * k] = (i * a) / nx; nodes[3 * k + 1] = (j * a) / nx; normals[3 * k + 2] = 1; if (restrain(i, j)) fixed[k] = 1; }
+  for (let j = 0; j < nx; j++) for (let i = 0; i < nx; i++) { const k = j * n1 + i; if ((i + j) % 2) tris.push(k, k + 1, k + n1 + 1, k, k + n1 + 1, k + n1); else tris.push(k, k + 1, k + n1, k + 1, k + n1 + 1, k + n1); }
+  const set = new Set();
+  for (let t = 0; t < tris.length; t += 3) for (let k = 0; k < 3; k++) { const p = tris[t + k], r = tris[t + (k + 1) % 3]; set.add(p < r ? p * 1e6 + r : r * 1e6 + p); }
+  const edges = new Uint32Array(2 * set.size); let e = 0;
+  for (const kk of set) { edges[2 * e] = Math.floor(kk / 1e6); edges[2 * e + 1] = kk % 1e6; e++; }
+  const fr = new Frame(nodes, edges, normals, fixed, false, Uint32Array.from(tris));
+  return { fr, n1, m: e, nt: tris.length / 3 };
+}
+
+test('shell: simply supported plate under uniform load matches plate theory', () => {
+  const nx = 12, a = 100, t = 2, E = 3500, nu = 0.3, q = 0.001;
+  const { fr, n1, m, nt } = plateModel(nx, a, (i, j) => i === 0 || j === 0 || i === nx || j === nx);
+  const loads = new Float64Array(3 * n1 * n1);
+  for (let j = 0; j < n1; j++) for (let i = 0; i < n1; i++) loads[3 * (j * n1 + i) + 2] = -q * (a / nx) ** 2;
+  fr.thickness = new Float64Array(nt).fill(t);
+  fr.solve(new Float64Array(m).fill(1e-4), new Float64Array(m).fill(1e-4), loads, E, nu);
+  const w = fr.displacement((nx / 2) * n1 + nx / 2)[2], exact = (-0.00406 * q * a ** 4) / ((E * t ** 3) / (12 * (1 - nu * nu)));
+  assert.ok(Math.abs(w - exact) < 0.01 * Math.abs(exact), `${w} vs ${exact}`);
+  // at the centre Mx = My = 0.0479 q a^2, so von Mises at the face is 6 M / t^2
+  const sk = fr.skinState(), c = (nx / 2) * n1 + nx / 2;
+  let sum = 0, cnt = 0;
+  for (let k = 0; k < nt; k++) if ([0, 1, 2].some((i) => fr.tris[3 * k + i] === c)) { sum += skinStress(sk.N.subarray(3 * k, 3 * k + 3), sk.M.subarray(3 * k, 3 * k + 3), t); cnt++; }
+  const sExact = (6 * 0.0479 * q * a * a) / (t * t);
+  assert.ok(Math.abs(sum / cnt - sExact) < 0.08 * sExact, `${sum / cnt} vs ${sExact}`);
+});
+
+test('frame: eccentric rib bends under an axial load applied at the surface', () => {
+  const ne = 8, L = 80, E = 3500, b = 2, h = 6, P = 1;
+  const nodes = new Float64Array(3 * (ne + 1)), edges = new Uint32Array(2 * ne), normals = new Float64Array(3 * (ne + 1)), fixed = new Uint8Array(ne + 1);
+  for (let i = 0; i <= ne; i++) { nodes[3 * i] = (i * L) / ne; normals[3 * i + 2] = -1; } // rib hangs towards -z
+  for (let e = 0; e < ne; e++) { edges[2 * e] = e; edges[2 * e + 1] = e + 1; }
+  fixed[0] = 1;
+  const fr = new Frame(nodes, edges, normals, fixed, true, null, true);
+  const loads = new Float64Array(3 * (ne + 1)); loads[3 * ne] = P; // pull along x at the node, h/2 above the centroid
+  const r = fr.solve(new Float64Array(ne).fill(b), new Float64Array(ne).fill(h), loads, E);
+  const I = (b * h ** 3) / 12, M = (P * h) / 2;
+  // constant moment M: tip rotates M L / EI, node at the tip moves down by M L^2 / 2EI (towards the rib side)
+  const u = fr.displacement(ne);
+  assert.ok(Math.abs(u[2] - (-M * L * L) / (2 * E * I)) < 1e-4 * Math.abs(u[2]), `${u[2]}`);
+  assert.ok(Math.abs(r.N[3] - P) < 1e-6 && Math.abs(r.My[3] - M) < 1e-6 * M + 1e-6);
+});
+
+for (const skin of ['full', 'auto']) {
+  test(`pipeline (ribs + skin ${skin})`, () => {
+    const { mesh, info } = exampleMesh();
+    const sup = supportsAt(mesh, info, [[0.3, 0.15], [0.7, 0.15], [0.3, 0.5], [0.7, 0.5], [0.3, 0.85], [0.7, 0.85]]);
+    const pts = new Float64Array(sup.length * 3);
+    sup.forEach((v, i) => pts.set(mesh.positions.subarray(3 * v, 3 * v + 3), 3 * i));
+    const r = runPipeline(mesh, pts, { spacing: 12, pressure: 10, skin });
+    const s = r.stats;
+    assert.ok(s.utilisationMax < 1.05 && s.skin.uMax < 1.05, `${s.utilisationMax} ${s.skin.uMax}`);
+    assert.ok(r.skinThickness.every((t) => t === 0 || (t >= 1 && t <= 4 + 1e-9)));
+    if (skin === 'full') assert.ok(Math.abs(s.skin.coverage - 1) < 1e-9);
+    else assert.ok(s.skin.coverage > 0.05 && s.skin.coverage < 0.98, `coverage ${s.skin.coverage}`);
+    // every skin triangle edge is also a rib
+    const es = new Set();
+    for (let e = 0; e < s.members; e++) { const a = r.network.edges[2 * e], b = r.network.edges[2 * e + 1]; es.add(Math.min(a, b) + ',' + Math.max(a, b)); }
+    for (let t = 0; t < r.triangles.length; t += 3) for (let k = 0; k < 3; k++) { const a = r.triangles[t + k], b = r.triangles[t + (k + 1) % 3]; assert.ok(es.has(Math.min(a, b) + ',' + Math.max(a, b))); }
+    const obj = exportSkinOBJ(r, mesh).split('\n');
+    assert.equal(obj.filter((l) => l.startsWith('v ')).length, info.nv);
+    const faces = obj.filter((l) => l.startsWith('f ')).length;
+    assert.ok(faces > 0 && faces <= info.nt);
+    if (skin === 'auto') assert.ok(faces < info.nt);
+    assert.equal(JSON.parse(exportJSON(r)).skin.thickness.length, r.triangles.length / 3);
+  });
+}

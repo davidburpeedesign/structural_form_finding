@@ -85,6 +85,14 @@ export function buildNetwork(mesh, info, vertexLoad, supportVerts, spacing, maxN
     }
   for (const [kk, c] of triCount) if (c <= 2) edgeSet.add(kk);
 
+  // unique Delaunay triangles, used as skin elements; their edges are always network members
+  const triKeys = new Set(), triList = [];
+  for (const [a, b, c] of tri) {
+    const k = [a, b, c].sort((p, q) => p - q).join(',');
+    if (triKeys.has(k)) continue;
+    triKeys.add(k); triList.push(a, b, c);
+    for (const [p, q] of [[a, b], [b, c], [a, c]]) edgeSet.add(p < q ? p * nn + q : q * nn + p);
+  }
   const edges = new Uint32Array(2 * edgeSet.size);
   let e = 0;
   for (const kk of edgeSet) { edges[2 * e] = Math.floor(kk / nn); edges[2 * e + 1] = kk % nn; e++; }
@@ -104,5 +112,5 @@ export function buildNetwork(mesh, info, vertexLoad, supportVerts, spacing, maxN
   }
   const fixed = new Uint8Array(nn);
   for (let i = 0; i < nSupports; i++) fixed[i] = 1;
-  return { nodes, nodeNormals, nodeLoad, nodeBoundary, edges, fixed, nSupports, seeds: Uint32Array.from(seeds), unassignedLoad: unassigned };
+  return { triangles: Uint32Array.from(triList), owner, nodes, nodeNormals, nodeLoad, nodeBoundary, edges, fixed, nSupports, seeds: Uint32Array.from(seeds), unassignedLoad: unassigned };
 }

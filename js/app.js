@@ -3,7 +3,7 @@ import { OrbitControls } from '../vendor/OrbitControls.js';
 import { loadMesh, loadPoints } from './io.js';
 import { analyseMesh } from './mesh.js';
 import { sampleBSpline } from './splines.js';
-import { exportIGES, exportCSV, exportJSON } from './pipeline.js';
+import { exportIGES, exportCSV, exportJSON, exportSkinOBJ } from './pipeline.js';
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -24,7 +24,7 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 1.5));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 camera.add(sun); sun.position.set(0.4, 0.8, 1); scene.add(camera);
 
-const groups = { mesh: new THREE.Group(), supports: new THREE.Group(), rods: new THREE.Group(), secondary: new THREE.Group(), curves: new THREE.Group() };
+const groups = { skin: new THREE.Group(), mesh: new THREE.Group(), supports: new THREE.Group(), rods: new THREE.Group(), secondary: new THREE.Group(), curves: new THREE.Group() };
 Object.values(groups).forEach((g) => scene.add(g));
 groups.curves.visible = false;
 let needsRender = true;
@@ -161,11 +161,34 @@ function ribMesh(result, select, colourOf) {
   return inst;
 }
 
+// skin zones: the faces of the design mesh that carry skin, brighter where it is thicker
+function rebuildSkin() {
+  clearGroup(groups.skin);
+  const r = state.result;
+  if (!r || !r.skinVertex) return;
+  const { positions, triangles } = state.mesh, t = r.skinVertex, tMax = Math.max(r.stats.skin.tMax, 1e-9), tMin = r.params.skinMin;
+  const idx = [];
+  for (let f = 0; f < triangles.length / 3; f++) {
+    const a = triangles[3 * f], b = triangles[3 * f + 1], c = triangles[3 * f + 2];
+    if (t[a] > 0 && t[b] > 0 && t[c] > 0) idx.push(a, b, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(positions), 3));
+  g.setIndex(idx);
+  const col = new Float32Array(positions.length), lo = new THREE.Color('#a3a29b'), hi = new THREE.Color(css('--mx-bone')), c = new THREE.Color();
+  for (let v = 0; v < t.length; v++) { c.copy(lo).lerp(hi, tMax > tMin ? Math.max(0, (t[v] - tMin) / (tMax - tMin)) : 0); col[3 * v] = c.r; col[3 * v + 1] = c.g; col[3 * v + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  groups.skin.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.85, transparent: true, opacity: 0.55, depthWrite: false })));
+  invalidate();
+}
+
 function rebuildResult() {
+  rebuildSkin();
   clearGroup(groups.rods); clearGroup(groups.secondary); clearGroup(groups.curves);
   const r = state.result;
   if (!r) return;
-  const cT = new THREE.Color(DATA.amber), cC = new THREE.Color(DATA.blue), cS = new THREE.Color('#6f6e6b');
+  const cT = new THREE.Color(DATA.amber), cC = new THREE.Color(DATA.blue), cS = new THREE.Color('#4f4e4b');
   const build = r.method === 'ribs' ? ribMesh : rodMesh;
   groups.rods.add(build(r, (e) => r.primary[e], (e) => (r.force[e] >= 0 ? cT : cC)));
   groups.secondary.add(build(r, (e) => !r.primary[e], () => cS));
@@ -256,8 +279,13 @@ $('pickBtn').addEventListener('click', () => {
 $('down').addEventListener('change', () => { frameCamera(); clearResult(); });
 function syncMethod() {
   const m = $('method').value;
-  for (const el of document.querySelectorAll('[data-m]')) el.hidden = el.dataset.m !== m;
+  const sk = $('skin').value;
+  for (const el of document.querySelectorAll('[data-m]')) {
+    const s = el.dataset.s;
+    el.hidden = el.dataset.m !== m || (s === '1' && sk === 'off') || (s === 'auto' && sk !== 'auto');
+  }
 }
+$('skin').addEventListener('change', () => { syncMethod(); clearResult(); });
 $('method').addEventListener('change', () => { syncMethod(); clearResult(); });
 syncMethod();
 $('pressure').addEventListener('input', updateInfo);
@@ -281,7 +309,7 @@ canvas.addEventListener('pointerup', (ev) => {
   clearResult(); rebuildSupports(); updateInfo();
 });
 
-for (const [id, g] of [['showMesh', 'mesh'], ['showRods', 'rods'], ['showSecondary', 'secondary'], ['showCurves', 'curves']])
+for (const [id, g] of [['showSkin', 'skin'], ['showMesh', 'mesh'], ['showRods', 'rods'], ['showSecondary', 'secondary'], ['showCurves', 'curves']])
   $(id).addEventListener('change', (ev) => { groups[g].visible = ev.target.checked; invalidate(); });
 
 // ---------------------------------------------------------------- run
@@ -289,6 +317,7 @@ function readParams() {
   const v = (id) => +$(id).value;
   return {
     method: $('method').value, maxDepth: v('maxDepth'), maxAspect: v('maxAspect'),
+    skin: $('skin').value, skinMin: v('skinMin'), skinMax: v('skinMax'), skinKeep: v('skinKeep') / 100,
     down: downVector(), pressure: v('pressure'), spacing: v('spacing'), mode: $('mode').value,
     lambda: Math.pow(10, v('lambda')), maxIter: v('iters'), threshold: v('threshold') / 100, maxTurn: v('maxTurn'),
     material: { strength: v('strength'), modulus: v('modulus'), density: v('density'), safety: v('safety'), minDiameter: v('minDia'), minOpening: v('minOpen') },
@@ -340,7 +369,15 @@ function showStats(r) {
     ['sized by buckling', `${s.nBuckling}`],
     ['at depth limit', `${s.nCapped}`],
     ['rib volume', `${f(s.volume / 1000, 2)} cm³`],
-    ['rib mass', `${f(s.mass, 2)} g`],
+    ...(s.skin ? [
+      ['skin'],
+      ['coverage', `${f(s.skin.coverage * 100, 0)} %`],
+      ['thickest', `${f(s.skin.tMax, 2)} mm`],
+      ['peak stress / allowable', `${f(s.skin.uMax * 100, 0)} %`],
+      ['skin volume', `${f(s.skin.volume / 1000, 2)} cm³`],
+      ['total'],
+    ] : []),
+    ['mass', `${f(s.mass, 2)} g`],
     ['curves'],
     ['primary / secondary', `${s.curvesPrimary} / ${s.curvesSecondary}`],
   ] : [
@@ -375,8 +412,9 @@ function showStats(r) {
     table.append(tr);
   }
   $('exportInfo').textContent = r.method === 'ribs'
-    ? 'iges levels: 1 primary / 2 secondary curves on the surface, 3 supports, 4 / 5 the lower edge of each rib in the same order. loft a surface curve to its lower edge for the rib. labels: h = largest depth, w = largest width. csv lists depth at every node.'
+    ? 'iges levels: 1 primary / 2 secondary curves on the surface, 3 supports, 4 / 5 the lower edge of each rib in the same order. loft a surface curve to its lower edge for the rib. labels: h = largest depth, w = largest width. csv lists depth at every node.' + (r.skinVertex ? ' skin.obj holds the faces of the design mesh that carry skin, thickness as vertex colour.' : '')
     : 'iges levels: 1 primary / 2 secondary / 3 supports. red = tension, blue = compression. each curve is labelled with its largest diameter. csv rows follow the same order.';
+  $('expSkin').hidden = !r.skinVertex;
   $('resultsSection').hidden = false; $('exportSection').hidden = false;
 }
 
@@ -391,6 +429,7 @@ const opt = () => ({ includeSecondary: $('incSecondary').checked });
 $('expIges').addEventListener('click', () => download('form_finder.splines.igs', exportIGES(state.result, opt())));
 $('expIgesPoly').addEventListener('click', () => download('form_finder.polylines.igs', exportIGES(state.result, { ...opt(), polyline: true })));
 $('expCsv').addEventListener('click', () => download('form_finder.curves.csv', exportCSV(state.result, opt()), 'text/csv'));
+$('expSkin').addEventListener('click', () => download('form_finder.skin.obj', exportSkinOBJ(state.result, state.mesh)));
 $('expJson').addEventListener('click', () => download('form_finder.json', exportJSON(state.result), 'application/json'));
 
 // hooks for automated checks

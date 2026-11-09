@@ -129,7 +129,7 @@ main { position: relative; min-width: 0; height: 100vh; background:
 .legend { color: var(--text-faint); }
 .sw { display: inline-block; width: 12px; height: 2px; margin-right: 6px; vertical-align: middle; }
 .sw.tension { background: var(--mx-data-amber); } .sw.compression { background: var(--mx-data-blue); }
-.sw.secondary { background: var(--mx-bone-40); } .sw.support { width: 6px; height: 6px; background: var(--mx-white); }
+.sw.secondary { background: var(--mx-bone-40); } .sw.skin { height: 8px; background: var(--mx-bone-24); } .sw.support { width: 6px; height: 6px; background: var(--mx-white); }
 #readout { position: absolute; right: var(--sp-5); bottom: var(--sp-5); margin: 0; color: var(--text-faint); font-size: var(--fs-caption); text-align: right; white-space: pre; pointer-events: none; font-variant-numeric: tabular-nums; }
 #empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--text-muted); pointer-events: none; letter-spacing: var(--ls-ui); }
 

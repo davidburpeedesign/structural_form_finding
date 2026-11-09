@@ -59,14 +59,25 @@ own cell: scalar × area × pressure, along the load direction.
 The network stays exactly on the design surface. Each member is a rectangular rib hanging below
 it (on the side the load pushes towards): width in the surface, depth along the normal.
 
-1. **Frame analysis.** The network is solved as a rigid-jointed 3D frame of Euler–Bernoulli beams
-   (6 degrees of freedom per node, banded LDLᵀ). Supports are pinned.
+1. **Analysis.** The network is solved as a rigid-jointed 3D frame of Euler–Bernoulli beams
+   (6 degrees of freedom per node, banded LDLᵀ). Supports are pinned. Each rib's centroid sits
+   half its depth below the surface. With a skin, the network's triangles become flat shell
+   elements (constant-strain membrane + discrete Kirchhoff triangle bending) sharing the same
+   nodes, so ribs and skin act together as a stiffened shell.
 2. **Sizing.** Each rib is resized for its own axial force and bending moments so that
    `|N|/(bh) + 6·My/(bh²) + 6·Mz/(hb²)` meets 90 % of the allowable stress. Depth grows first,
    width follows at `depth / max ratio`; at the depth limit the width grows instead. Compression
    ribs are also checked for Euler buckling over their own length. Analysis and sizing repeat
    until the sections settle, then closing passes only let sections grow.
-3. **Curves.** Ribs clearly deeper than the minimum are *primary*. Members are chained into
+3. **Skin** (optional).
+   - *off*: ribs only.
+   - *full*: skin everywhere at the minimum wall thickness, thickened where its von Mises stress
+     asks, up to the maximum.
+   - *auto*: starts full, then removes skin that is doing little: triangles at minimum thickness
+     whose stress is below a share of the allowable (default 25 %). Removal happens over twelve
+     rounds with a rising threshold, re-sizing ribs and skin after each, so load shed by removed
+     skin is picked up before more is taken away.
+4. **Curves.** Ribs clearly deeper than the minimum are *primary*. Members are chained into
    curves as below. Every curve carries a depth and width at each node, and a second curve: its
    lower edge, the nodes moved below the surface by the depth.
 
@@ -104,15 +115,20 @@ The datasheet gives no compressive strength, so the tensile value is used for bo
 - **IGES, polylines**: the same curves as degree-1 polylines through the nodes.
 - **CSV**: one row per curve in IGES order. For ribs it includes the depth at every node.
 - **JSON**: nodes, members with force, moment, width and depth, curves with knots, control
-  points and per-node depths.
+  points and per-node depths, skin triangles with thickness.
+- **Skin OBJ** (when a skin is on): the faces of the design mesh that carry skin, with thickness
+  as a grey vertex colour (the scale is in the file's first line). Zones are one node cell wider
+  than the analysed skin, which is on the safe side.
 
 ## Limits
 
 - One load case, linear elastic, small deflections. No global buckling or fatigue check.
-- Ribs-only model: there is no skin. Load is lumped at the nodes; a real part needs something
-  to collect pressure between ribs. A skin option (off / full / auto) is the planned next stage.
-- Rib centrelines are modelled on the surface, not half a depth below it, and shear stress is
-  not included in sizing.
+- Load is lumped at the nodes. With the skin off or removed, a real part still needs something
+  to collect pressure between ribs; local bending of a skin panel between ribs is not checked.
+- The skin is analysed on the network's triangles (one element per cell), which is coarse.
+- Shear stress is not included in sizing.
+- Sizing can stall slightly above the allowable when many ribs sit at the depth limit; the
+  results panel reports peak stress and warns.
 - Curves follow the triangulated network, so they can be short or wavy. Laying ribs along
   principal stress lines from a shell analysis is planned.
 - Curves pass through nodes on the surface; between nodes a spline can leave it by the sag of
@@ -133,7 +149,8 @@ js/fdm.js, formfind.js  force-density solve, objective, adjoint gradient, driver
 js/mixed.js             alternating solver for mixed tension/compression
 js/optimize.js          L-BFGS
 js/linalg.js            dense LU, banded LDLᵀ, bandwidth-reducing ordering
-js/frame.js             3D frame analysis and rib sizing
+js/frame.js             3D frame analysis, rib and skin sizing
+js/shell.js             skin shell elements (CST + DKT)
 js/sizing.js            strut diameters (funicular net)
 js/splines.js           chaining and B-spline interpolation
 js/iges.js              IGES writer

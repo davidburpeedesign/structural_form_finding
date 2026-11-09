@@ -66,6 +66,18 @@
       <span class="unit" data-m="ribs"><input type="number" id="maxDepth" value="20" min="1" step="1"><i>mm</i></span>
       <label for="maxAspect" data-m="ribs">max depth / width</label>
       <span class="unit" data-m="ribs"><input type="number" id="maxAspect" value="6" min="1" max="20" step="0.5"><i></i></span>
+      <label for="skin" data-m="ribs">skin</label>
+      <select id="skin" data-m="ribs">
+        <option value="off">off / ribs only</option>
+        <option value="full">full</option>
+        <option value="auto">auto / where needed</option>
+      </select>
+      <label for="skinMin" data-m="ribs" data-s="1">skin thickness min</label>
+      <span class="unit" data-m="ribs" data-s="1"><input type="number" id="skinMin" value="1" min="0.3" step="0.1"><i>mm</i></span>
+      <label for="skinMax" data-m="ribs" data-s="1">skin thickness max</label>
+      <span class="unit" data-m="ribs" data-s="1"><input type="number" id="skinMax" value="4" min="0.3" step="0.5"><i>mm</i></span>
+      <label for="skinKeep" data-m="ribs" data-s="auto">keep skin if stress ≥</label>
+      <span class="unit" data-m="ribs" data-s="auto"><input type="number" id="skinKeep" value="25" min="1" max="90" step="5"><i>% allow</i></span>
       <label for="mode" data-m="funicular">member action</label>
       <select id="mode" data-m="funicular">
         <option value="mixed">tension + compression</option>
@@ -128,6 +140,7 @@
       <button id="expIgesPoly" type="button" class="tick">polylines.igs</button>
       <button id="expCsv" type="button" class="tick">curves.csv</button>
       <button id="expJson" type="button" class="tick">all.json</button>
+      <button id="expSkin" type="button" class="tick" hidden>skin.obj</button>
     </div>
     <p class="info" id="exportInfo"></p>
   </section>
@@ -138,6 +151,7 @@
   <div id="overlay">
     <div class="toggles">
       <label><input type="checkbox" id="showMesh" checked> surface</label>
+      <label><input type="checkbox" id="showSkin" checked> skin</label>
       <label><input type="checkbox" id="showRods" checked> members</label>
       <label><input type="checkbox" id="showSecondary" checked> secondary</label>
       <label><input type="checkbox" id="showCurves"> curves</label>
@@ -146,6 +160,7 @@
       <span><i class="sw tension"></i>tension</span>
       <span><i class="sw compression"></i>compression</span>
       <span><i class="sw secondary"></i>secondary</span>
+      <span><i class="sw skin"></i>skin</span>
       <span><i class="sw support"></i>support</span>
     </div>
   </div>

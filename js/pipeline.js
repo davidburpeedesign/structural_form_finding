@@ -12,6 +12,10 @@ import { Frame, sizeRibs } from './frame.js';
 export const DEFAULTS = {
   method: 'ribs',       // 'ribs': network fixed on the surface, sized in bending. 'funicular': free-form force density
   maxDepth: 20,         // mm, deepest rib allowed below the surface
+  skin: 'off',          // 'off' | 'full' | 'auto' (skin only where it is doing work)
+  skinMin: 1.0,         // mm, thinnest printable wall
+  skinMax: 4.0,         // mm
+  skinKeep: 0.25,       // auto: keep skin where its stress is at least this share of allowable
   sizingIter: 40,       // resize-and-reanalyse passes for rib sizing
   maxAspect: 6,         // largest depth / width ratio of a rib
   down: [0, -1, 0],
@@ -113,9 +117,11 @@ function runRibs(mesh, info, net, params, warnings, onProgress) {
   for (let i = 0; i < n; i++) { totalLoad += nodeLoad[i]; for (let k = 0; k < 3; k++) loads[3 * i + k] = nodeLoad[i] * params.down[k]; }
   const clamp = net.nSupports < 3;
   if (clamp) warnings.push('fewer than three supports. supports are treated as clamped so the frame is stable.');
-  const frame = new Frame(nodes, edges, below, fixed, clamp);
+  const skinOn = params.skin === 'full' || params.skin === 'auto';
+  const frame = new Frame(nodes, edges, below, fixed, clamp, skinOn ? net.triangles : null, true);
   const lim = { sigma: mat.strength / mat.safety, minWidth: mat.minDiameter, minDepth: mat.minDiameter, maxDepth: params.maxDepth, maxAspect: params.maxAspect, E: mat.modulus, safety: mat.safety };
-  const fsd = sizeRibs(frame, loads, lim, { maxIter: params.sizingIter, onIter: (it, tot) => onProgress(it, tot, 0) });
+  const fsd = sizeRibs(frame, loads, lim, { maxIter: params.sizingIter, onIter: (it, tot) => onProgress(it, tot, 0),
+    skin: { mode: params.skin, tMin: params.skinMin, tMax: Math.max(params.skinMin, params.skinMax), keep: params.skinKeep } });
 
   // reactions from global equilibrium of each support node are not needed member by member:
   // report deflection, and check that sections satisfy the stress limit
@@ -123,6 +129,24 @@ function runRibs(mesh, info, net, params, warnings, onProgress) {
   const disp = new Float64Array(3 * n);
   for (let i = 0; i < n; i++) { const u = frame.displacement(i); disp.set(u, 3 * i); dispMax = Math.max(dispMax, Math.hypot(...u)); }
   if (fsd.uMax > 1.02) warnings.push(`peak stress is ${(fsd.uMax * 100).toFixed(0)} % of allowable after sizing. a larger depth limit or coarser spacing clears this.`);
+
+  // skin: thickness per network triangle -> per node (largest adjoining) -> per source vertex
+  // (through each vertex's Voronoi cell), so the skin zones can be drawn and exported on the
+  // design mesh itself
+  let skinStats = null, skinVertex = null;
+  if (skinOn) {
+    const tr = net.triangles, nt = tr.length / 3, nodeSkin = new Float64Array(n);
+    let aKept = 0, aAll = 0, vol = 0, tMax = 0;
+    for (let t = 0; t < nt; t++) {
+      const th = fsd.thickness[t], A = frame.shell.area[t];
+      aAll += A;
+      if (th > 0) { aKept += A; vol += A * th; tMax = Math.max(tMax, th); for (let k = 0; k < 3; k++) nodeSkin[tr[3 * t + k]] = Math.max(nodeSkin[tr[3 * t + k]], th); }
+    }
+    skinVertex = new Float64Array(info.nv);
+    for (let v = 0; v < info.nv; v++) if (net.owner[v] >= 0) skinVertex[v] = nodeSkin[net.owner[v]];
+    skinStats = { coverage: aKept / aAll, volume: vol, tMax, uMax: fsd.skinUMax };
+    if (fsd.skinUMax > 1.02) warnings.push(`skin stress peaks at ${(fsd.skinUMax * 100).toFixed(0)} % of allowable. a larger maximum skin thickness clears this.`);
+  }
 
   let hMax = 0, bMax = 0, volume = 0, lMin = Infinity, tight = 0;
   const count = [0, 0, 0, 0];
@@ -162,12 +186,13 @@ function runRibs(mesh, info, net, params, warnings, onProgress) {
     method: 'ribs', params, warnings,
     network: { nodes, edges, fixed, nodeLoad, nSupports: net.nSupports },
     x: nodes, below, force: fsd.N, moment: fsd.My, length: frame.length, displacement: disp,
+    skinVertex, skinThickness: fsd.thickness, triangles: skinOn ? net.triangles : null,
     width: fsd.width, depth: fsd.depth, diameter: fsd.depth, governs: fsd.governs, utilisation: fsd.utilisation, primary: sp.primary,
     curves: sp.curves,
     stats: {
       iterations: fsd.iterations, nodes: n, members: m, minLength: lMin, totalLoad,
       dispMax, utilisationMax: fsd.uMax, depthMax: hMax, widthMax: bMax,
-      volume, mass: (volume / 1000) * mat.density,
+      volume, skin: skinStats, mass: ((volume + (skinStats ? skinStats.volume : 0)) / 1000) * mat.density,
       nMin: count[0], nStrength: count[1], nBuckling: count[2], nCapped: count[3],
       primaryMembers: pT + pC, primaryTension: pT, primaryCompression: pC,
       curvesPrimary: sp.curves.filter((c) => c.tier === 'primary').length, curvesSecondary: sp.curves.filter((c) => c.tier === 'secondary').length,
@@ -226,6 +251,23 @@ export function exportCSV(result, { includeSecondary = true } = {}) {
   return rows.join('\n') + '\n';
 }
 
+/**
+ * Skin zones as an OBJ of the design mesh: only the faces that carry skin, with the thickness
+ * written as a grey vertex colour (thickness / scale), the same convention as the load input.
+ */
+export function exportSkinOBJ(result, mesh) {
+  const t = result.skinVertex, scale = Math.max(result.stats.skin.tMax, 1e-9);
+  const lines = [`# form_finder skin zones. vertex colour r=g=b = thickness / ${scale.toFixed(4)} mm`];
+  const P = mesh.positions;
+  for (let v = 0; v < t.length; v++) { const c = (t[v] / scale).toFixed(4); lines.push(`v ${P[3 * v]} ${P[3 * v + 1]} ${P[3 * v + 2]} ${c} ${c} ${c}`); }
+  const F = mesh.triangles;
+  for (let f = 0; f < F.length / 3; f++) {
+    const a = F[3 * f], b = F[3 * f + 1], c = F[3 * f + 2];
+    if (t[a] > 0 && t[b] > 0 && t[c] > 0) lines.push(`f ${a + 1} ${b + 1} ${c + 1}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
 /** Everything, for scripting (e.g. sweeping each member at its own section in Grasshopper). */
 export function exportJSON(result) {
   const r3 = (a) => Array.from(a, (v) => Math.round(v * 1e4) / 1e4);
@@ -237,6 +279,7 @@ export function exportJSON(result) {
     stats: result.stats,
     nodes: r3(result.x),
     ...(ribs ? { depthDirection: r3(result.below), displacement: r3(result.displacement) } : {}),
+    ...(ribs && result.triangles ? { skin: { triangles: Array.from(result.triangles), thickness: r3(result.skinThickness) } } : {}),
     supports: Array.from(result.network.fixed).flatMap((f, i) => (f ? [i] : [])),
     ...(ribs ? {} : { reactions: Array.from(result.network.fixed).flatMap((f, i) => (f ? [r3(result.reactions.subarray(3 * i, 3 * i + 3))] : [])) }),
     members: Array.from({ length: result.force.length }, (_, e) => ({

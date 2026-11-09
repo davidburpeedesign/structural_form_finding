@@ -70,7 +70,7 @@ export function reverseCuthillMcKee(adjacency) {
     const out = [start]; seen[start] = 1;
     for (let h = 0; h < out.length; h++) {
       const nb = adjacency[out[h]].filter((w) => !seen[w]).sort((a, b) => deg[a] - deg[b]);
-      for (const w of nb) { seen[w] = 1; out.push(w); }
+      for (const w of nb) if (!seen[w]) { seen[w] = 1; out.push(w); } // lists may repeat a neighbour
     }
     return out;
   };
