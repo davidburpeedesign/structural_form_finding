@@ -40,7 +40,7 @@ export function buildNetwork(mesh, info, vertexLoad, supportVerts, spacing, maxN
   const seen = new Set();
   for (const v of supportVerts) if (!seen.has(v)) { seen.add(v); addSeed(v); }
   const nSupports = seeds.length;
-  if (nSupports === 0) throw new Error('At least one support is required.');
+  if (nSupports === 0) throw new Error('at least one support is required.');
   for (;;) {
     let far = -1, fd = 0;
     for (let v = 0; v < nv; v++) {

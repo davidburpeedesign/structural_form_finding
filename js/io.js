@@ -67,7 +67,7 @@ export function parsePLY(buffer) {
     headerEnd++;
     break;
   }
-  if (headerEnd < 0) throw new Error('PLY: no end_header found');
+  if (headerEnd < 0) throw new Error('ply: no end_header found');
   const header = new TextDecoder().decode(bytes.subarray(0, headerEnd)).split(/\r?\n/);
   let format = 'ascii';
   const elements = [];
@@ -81,7 +81,7 @@ export function parsePLY(buffer) {
       else el.props.push({ list: false, type: p[1], name: p[2] });
     }
   }
-  if (format === 'binary_big_endian') throw new Error('PLY: big-endian files are not supported');
+  if (format === 'binary_big_endian') throw new Error('ply: big-endian files are not supported');
   const sizes = { char: 1, uchar: 1, int8: 1, uint8: 1, short: 2, ushort: 2, int16: 2, uint16: 2, int: 4, uint: 4, int32: 4, uint32: 4, float: 4, float32: 4, double: 8, float64: 8 };
   const dv = new DataView(buffer);
   let off = headerEnd;
@@ -154,7 +154,7 @@ export function parsePLY(buffer) {
         }
     }
   }
-  if (!positions) throw new Error('PLY: no vertex element');
+  if (!positions) throw new Error('ply: no vertex element');
   return { positions, triangles: Uint32Array.from(tris), scalars, pointIdx: [] };
 }
 
@@ -204,8 +204,8 @@ export function loadMesh(name, buffer) {
   let m;
   if (e === 'ply') m = parsePLY(buffer);
   else if (e === 'obj') m = parseOBJ(new TextDecoder().decode(buffer));
-  else throw new Error(`Unsupported mesh format ".${e}" - use .obj or .ply`);
-  if (m.triangles.length === 0) throw new Error('The file contains no faces.');
+  else throw new Error(`unsupported mesh format ".${e}" - use .obj or .ply`);
+  if (m.triangles.length === 0) throw new Error('the file contains no faces.');
   return m;
 }
 
@@ -224,6 +224,6 @@ export function loadPoints(name, buffer) {
     } else pts = m.positions;
   } else if (e === 'ply') pts = parsePLY(buffer).positions;
   else pts = parsePointText(text);
-  if (pts.length === 0) throw new Error('No points found in the file.');
+  if (pts.length === 0) throw new Error('no points found in the file.');
   return pts;
 }

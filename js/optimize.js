@@ -4,7 +4,7 @@ export function lbfgs(fn, x0, { maxIter = 200, history = 12, gtol = 1e-7, ftol =
   const n = x0.length;
   let x = Float64Array.from(x0), g = new Float64Array(n);
   let f = fn(x, g);
-  if (!Number.isFinite(f)) throw new Error('Optimiser: starting point is infeasible.');
+  if (!Number.isFinite(f)) throw new Error('optimiser: starting point is infeasible.');
   const S = [], Y = [], RHO = [];
   const d = new Float64Array(n), xn = new Float64Array(n);
   let gn = new Float64Array(n);

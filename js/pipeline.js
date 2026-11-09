@@ -25,8 +25,8 @@ export function runPipeline(mesh, supportPoints, userParams = {}, onProgress = (
   const params = { ...DEFAULTS, ...userParams, material: { ...DEFAULT_MATERIAL, ...(userParams.material || {}) } };
   const warnings = [];
   const info = analyseMesh(mesh.positions, mesh.triangles);
-  if (info.nonManifold) warnings.push(`${info.nonManifold} non-manifold edges in the mesh; results near them may be unreliable.`);
-  if (!mesh.scalars) warnings.push('The mesh has no vertex colours, so the load scalar is 1.0 everywhere.');
+  if (info.nonManifold) warnings.push(`${info.nonManifold} non-manifold edges in the mesh. results near them may be unreliable.`);
+  if (!mesh.scalars) warnings.push('mesh has no vertex colours. load scalar is 1.0 everywhere.');
 
   const pressure = params.pressure * 1e-3; // kPa -> N/mm2
   const vertexLoad = new Float64Array(info.nv);
@@ -46,11 +46,11 @@ export function runPipeline(mesh, supportPoints, userParams = {}, onProgress = (
     net.nodes.set(supportPoints.subarray(3 * s, 3 * s + 3), 3 * node);
     offMax = Math.max(offMax, snap.dist[s]);
   }
-  if (offMax > 0.5 * params.spacing) warnings.push(`A support lies ${offMax.toFixed(1)} mm from the surface; it is connected to the nearest part of the network.`);
-  if (net.unassignedLoad > 0) warnings.push('Part of the mesh is not connected to any support and carries no members.');
-  if (net.nSupports < 3) warnings.push('Fewer than three supports: the result is in equilibrium for this load only and has no stability against any other load.');
+  if (offMax > 0.5 * params.spacing) warnings.push(`a support lies ${offMax.toFixed(1)} mm off the surface. it is joined to the nearest part of the network.`);
+  if (net.unassignedLoad > 0) warnings.push('part of the mesh is not connected to any support and carries no members.');
+  if (net.nSupports < 3) warnings.push('fewer than three supports. the result balances this load only and has no stability against any other.');
   const m = net.edges.length / 2, n = net.nodes.length / 3;
-  if (n >= 1200) warnings.push('Node limit reached (1200); the network is coarser than the requested spacing in places.');
+  if (n >= 1200) warnings.push('node limit reached (1200). the network is coarser than the requested spacing in places.');
 
   // members shorter than this cannot be printed with a clear opening between their end nodes
   const minLength = Math.min(0.6 * params.spacing, params.material.minOpening + params.material.minDiameter);
@@ -64,8 +64,8 @@ export function runPipeline(mesh, supportPoints, userParams = {}, onProgress = (
     lMin = Math.min(lMin, ff.length[e]);
     if (ff.length[e] - sizing.diameter[e] < params.material.minOpening) tight++;
   }
-  if (tight) warnings.push(`${tight} member(s) are shorter than the minimum opening (${params.material.minOpening} mm) plus their own diameter; increase the node spacing.`);
-  if (ff.stats.devMax > 2 * params.spacing) warnings.push(`The equilibrium shape departs from the surface by up to ${ff.stats.devMax.toFixed(1)} mm. This surface is not close to funicular for these supports and this load direction.`);
+  if (tight) warnings.push(`${tight} member(s) are shorter than the minimum opening (${params.material.minOpening} mm) plus their own diameter. a larger node spacing clears this.`);
+  if (ff.stats.devMax > 2 * params.spacing) warnings.push(`the equilibrium shape leaves the surface by up to ${ff.stats.devMax.toFixed(1)} mm. this surface is not close to funicular for these supports and this load direction.`);
 
   const signs = { tension: 0, compression: 0 };
   for (let e = 0; e < m; e++) if (Math.abs(ff.force[e]) >= params.threshold * sp.fmax) signs[ff.force[e] > 0 ? 'tension' : 'compression']++;

@@ -109,7 +109,7 @@ export function formFind(net, params, onProgress) {
   if (geometry) fdm.x.set(geometry);
   else {
     final = objective(fdm, q, opts, null);
-    if (!Number.isFinite(final.J)) throw new Error('Form-finding diverged. Check that every part of the mesh can reach a support.');
+    if (!Number.isFinite(final.J)) throw new Error('form-finding diverged. Check that every part of the mesh can reach a support.');
   }
   const { worst, reactions } = fdm.residual(q);
 

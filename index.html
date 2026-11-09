@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Form Finder</title>
+<meta name="color-scheme" content="dark">
+<title>MORPHXGEN form_finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Intel+One+Mono:wght@400;500;600&family=Montserrat:wght@500&family=Space+Mono:wght@400;700&display=swap">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
@@ -12,108 +16,111 @@
 <body>
 <aside id="panel">
   <header>
-    <h1>Form Finder</h1>
-    <p>Funicular member layouts by the force-density method</p>
+    <span class="wordmark">MORPHXGEN</span>
+    <h1>form_finder</h1>
+    <p>funicular member layouts. force-density method.</p>
   </header>
 
   <section>
-    <h2>1 · Geometry</h2>
-    <label class="file">Load mesh <span class="hint">.obj or .ply, vertex colour = load scalar</span>
+    <h2><span>01</span> geometry</h2>
+    <label class="file">mesh <span class="hint">.obj .ply / vertex colour = load scalar</span>
+      <span class="filerow"><span class="choose">choose file</span><span class="fname" id="meshName">none</span></span>
       <input type="file" id="meshFile" accept=".obj,.ply"></label>
-    <label class="file">Support points <span class="hint">.obj, .igs, .txt, .csv</span>
+    <label class="file">supports <span class="hint">.obj .igs .txt .csv</span>
+      <span class="filerow"><span class="choose">choose file</span><span class="fname" id="supportName">none</span></span>
       <input type="file" id="supportFile" accept=".obj,.igs,.iges,.txt,.csv,.xyz,.ply"></label>
     <div class="row">
-      <button id="pickBtn" type="button" aria-pressed="false">Place supports by clicking</button>
-      <button id="clearSupports" type="button">Clear</button>
+      <button id="pickBtn" type="button" class="tick" aria-pressed="false">place supports</button>
+      <button id="clearSupports" type="button" class="tick">clear</button>
     </div>
-    <button id="exampleBtn" type="button" class="link">Load the example mesh</button>
-    <p id="geomInfo" class="info">No mesh loaded.</p>
+    <button id="exampleBtn" type="button" class="link">load example_mesh</button>
+    <p id="geomInfo" class="info">no mesh loaded.</p>
   </section>
 
   <section>
-    <h2>2 · Load</h2>
+    <h2><span>02</span> load</h2>
     <div class="grid">
-      <label for="down">Load direction</label>
+      <label for="down">direction</label>
       <select id="down">
-        <option value="-x">−X</option><option value="+x">+X</option>
-        <option value="-y">−Y</option><option value="+y">+Y</option>
-        <option value="-z">−Z</option><option value="+z">+Z</option>
+        <option value="-x">-x</option><option value="+x">+x</option>
+        <option value="-y">-y</option><option value="+y">+y</option>
+        <option value="-z">-z</option><option value="+z">+z</option>
       </select>
-      <label for="pressure">Pressure at scalar 1.0</label>
-      <span class="unit"><input type="number" id="pressure" value="1" min="0" step="0.1"> kPa</span>
+      <label for="pressure">pressure at scalar 1.0</label>
+      <span class="unit"><input type="number" id="pressure" value="1" min="0" step="0.1"><i>kPa</i></span>
     </div>
     <p id="loadInfo" class="info"></p>
   </section>
 
   <section>
-    <h2>3 · Network</h2>
+    <h2><span>03</span> network</h2>
     <div class="grid">
-      <label for="spacing">Node spacing</label>
-      <span class="unit"><input type="number" id="spacing" value="8" min="3" step="0.5"> mm</span>
-      <label for="mode">Member action</label>
+      <label for="spacing">node spacing</label>
+      <span class="unit"><input type="number" id="spacing" value="8" min="3" step="0.5"><i>mm</i></span>
+      <label for="mode">member action</label>
       <select id="mode">
-        <option value="mixed">Tension and compression</option>
-        <option value="tension">Tension only (hanging net)</option>
-        <option value="compression">Compression only (vault)</option>
+        <option value="mixed">tension + compression</option>
+        <option value="tension">tension only</option>
+        <option value="compression">compression only</option>
       </select>
-      <label for="lambda">Follow surface ↔ save material</label>
+      <label for="lambda">follow surface / save material</label>
       <input type="range" id="lambda" min="-3" max="0.5" step="0.05" value="-1">
-      <label for="iters">Iterations</label>
+      <label for="iters">iterations</label>
       <input type="number" id="iters" value="600" min="20" max="5000" step="20">
     </div>
   </section>
 
   <section>
-    <h2>4 · Material and sizing</h2>
-    <p class="info">Defaults: Precimid 1174Pro CF, weakest (Z) build direction.</p>
+    <h2><span>04</span> material</h2>
+    <p class="info">precimid_1174pro_cf / sls / z-direction values.</p>
     <div class="grid">
-      <label for="strength">Strength</label>
-      <span class="unit"><input type="number" id="strength" value="36" min="1" step="1"> MPa</span>
-      <label for="modulus">Modulus</label>
-      <span class="unit"><input type="number" id="modulus" value="3500" min="1" step="100"> MPa</span>
-      <label for="density">Density</label>
-      <span class="unit"><input type="number" id="density" value="1.09" min="0.1" step="0.01"> g/cm³</span>
-      <label for="safety">Safety factor</label>
-      <input type="number" id="safety" value="3" min="1" step="0.1">
-      <label for="minDia">Minimum rod diameter</label>
-      <span class="unit"><input type="number" id="minDia" value="1" min="0.5" step="0.1"> mm</span>
-      <label for="minOpen">Minimum opening</label>
-      <span class="unit"><input type="number" id="minOpen" value="2.5" min="0" step="0.1"> mm</span>
+      <label for="strength">strength</label>
+      <span class="unit"><input type="number" id="strength" value="36" min="1" step="1"><i>MPa</i></span>
+      <label for="modulus">modulus</label>
+      <span class="unit"><input type="number" id="modulus" value="3500" min="1" step="100"><i>MPa</i></span>
+      <label for="density">density</label>
+      <span class="unit"><input type="number" id="density" value="1.09" min="0.1" step="0.01"><i>g/cm³</i></span>
+      <label for="safety">safety factor</label>
+      <span class="unit"><input type="number" id="safety" value="3" min="1" step="0.1"><i></i></span>
+      <label for="minDia">min rod diameter</label>
+      <span class="unit"><input type="number" id="minDia" value="1" min="0.5" step="0.1"><i>mm</i></span>
+      <label for="minOpen">min opening</label>
+      <span class="unit"><input type="number" id="minOpen" value="2.5" min="0" step="0.1"><i>mm</i></span>
     </div>
   </section>
 
   <section>
-    <h2>5 · Curves</h2>
+    <h2><span>05</span> curves</h2>
     <div class="grid">
-      <label for="threshold">Primary if force ≥</label>
-      <span class="unit"><input type="number" id="threshold" value="15" min="0" max="100" step="1"> % of peak</span>
-      <label for="maxTurn">Split curves turning more than</label>
-      <span class="unit"><input type="number" id="maxTurn" value="50" min="5" max="90" step="5"> °</span>
+      <label for="threshold">primary if force ≥</label>
+      <span class="unit"><input type="number" id="threshold" value="15" min="0" max="100" step="1"><i>% peak</i></span>
+      <label for="maxTurn">split if turn &gt;</label>
+      <span class="unit"><input type="number" id="maxTurn" value="50" min="5" max="90" step="5"><i>°</i></span>
     </div>
   </section>
 
   <section class="run">
-    <button id="runBtn" type="button" class="primary" disabled>Run form-finding</button>
+    <button id="runBtn" type="button" class="tick primary" disabled>generate</button>
     <progress id="progress" max="1" value="0" hidden></progress>
-    <p id="status" class="info" role="status"></p>
+    <p id="status" class="info status" role="status"></p>
     <ul id="warnings"></ul>
   </section>
 
   <section id="resultsSection" hidden>
-    <h2>Results</h2>
+    <h2><span>06</span> results</h2>
     <table id="stats"></table>
   </section>
 
   <section id="exportSection" hidden>
-    <h2>Export</h2>
-    <label class="check"><input type="checkbox" id="incSecondary" checked> Include secondary members</label>
-    <div class="row wrap">
-      <button id="expIges" type="button">IGES · splines</button>
-      <button id="expIgesPoly" type="button">IGES · polylines</button>
-      <button id="expCsv" type="button">CSV · curve table</button>
-      <button id="expJson" type="button">JSON · everything</button>
+    <h2><span>07</span> export</h2>
+    <label class="check"><input type="checkbox" id="incSecondary" checked> include secondary members</label>
+    <div class="cells">
+      <button id="expIges" type="button" class="tick">splines.igs</button>
+      <button id="expIgesPoly" type="button" class="tick">polylines.igs</button>
+      <button id="expCsv" type="button" class="tick">curves.csv</button>
+      <button id="expJson" type="button" class="tick">all.json</button>
     </div>
-    <p class="info">IGES levels: 1 primary, 2 secondary, 3 supports. Red = tension, blue = compression. Each curve is labelled with its largest diameter; the CSV rows follow the same order.</p>
+    <p class="info">iges levels: 1 primary / 2 secondary / 3 supports. red = tension, blue = compression. each curve is labelled with its largest diameter. csv rows follow the same order.</p>
   </section>
 </aside>
 
@@ -121,19 +128,20 @@
   <canvas id="view"></canvas>
   <div id="overlay">
     <div class="toggles">
-      <label><input type="checkbox" id="showMesh" checked> Surface</label>
-      <label><input type="checkbox" id="showRods" checked> Members</label>
-      <label><input type="checkbox" id="showSecondary" checked> Secondary</label>
-      <label><input type="checkbox" id="showCurves"> Curves</label>
+      <label><input type="checkbox" id="showMesh" checked> surface</label>
+      <label><input type="checkbox" id="showRods" checked> members</label>
+      <label><input type="checkbox" id="showSecondary" checked> secondary</label>
+      <label><input type="checkbox" id="showCurves"> curves</label>
     </div>
     <div class="legend">
-      <span><i class="sw tension"></i>Tension</span>
-      <span><i class="sw compression"></i>Compression</span>
-      <span><i class="sw secondary"></i>Secondary</span>
-      <span><i class="sw support"></i>Support</span>
+      <span><i class="sw tension"></i>tension</span>
+      <span><i class="sw compression"></i>compression</span>
+      <span><i class="sw secondary"></i>secondary</span>
+      <span><i class="sw support"></i>support</span>
     </div>
   </div>
-  <p id="empty">Load a mesh, add support points, then run.</p>
+  <p id="readout" aria-hidden="true"></p>
+  <p id="empty">awaiting mesh...</p>
 </main>
 <script type="module" src="js/app.js"></script>
 </body>

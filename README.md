@@ -1,4 +1,4 @@
-# Form Finder
+# MORPHXGEN form_finder
 
 A browser tool for funicular form-finding of strut networks on a loaded surface, aimed at
 additively manufactured (SLS) structures. It takes a triangulated surface carrying a load scalar,
@@ -6,6 +6,12 @@ plus point supports, and returns member centrelines as NURBS curves with a diame
 
 No build step and no server-side code: static files, plain ES modules, one vendored dependency
 (three.js, for the 3D view).
+
+The interface follows `morphxgen_visual_language`: void background, bone ink, one coral accent,
+monospace type, square corners, corner-tick controls, lowercase copy. Two deliberate departures:
+type sits below the 1920-canvas scale because the panel is a dense tool, and unit symbols keep
+their case (`MPa`, `N`, `kPa`) because lowercase would change their meaning. The brand fonts load
+from Google Fonts; offline, the system monospace is used.
 
 ## Run
 

@@ -12,14 +12,15 @@ const state = { mesh: null, info: null, supports: [], result: null, picking: fal
 
 // ---------------------------------------------------------------- scene
 const canvas = $('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setClearColor(0x000000, 0); // the page's void and grid show through
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 1e6);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
-scene.add(new THREE.HemisphereLight(0xffffff, 0x777777, 1.6));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 1.5));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
 camera.add(sun); sun.position.set(0.4, 0.8, 1); scene.add(camera);
 
@@ -29,13 +30,6 @@ groups.curves.visible = false;
 let needsRender = true;
 const invalidate = () => { needsRender = true; };
 controls.addEventListener('change', invalidate);
-
-function applyTheme() {
-  scene.background = new THREE.Color(css('--bg'));
-  invalidate();
-}
-applyTheme();
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); rebuildAll(); });
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -77,10 +71,13 @@ function frameCamera() {
   invalidate();
 }
 
-// load scalar -> colour ramp (light to dark, single hue)
+// Render palette: the brand's data scheme (imagery only).
+const DATA = { violet: '#312f4a', maroonDeep: '#472b31', maroon: '#8d3e46', amber: '#dd7d56', blue: '#6b95c2' };
+const RAMP = [DATA.violet, DATA.maroonDeep, DATA.maroon, DATA.amber].map((c) => new THREE.Color(c));
+// load scalar -> pressure-map colour
 function ramp(t, out) {
-  const lo = new THREE.Color(css('--panel')).lerp(new THREE.Color('#d9c9a8'), 0.6), hi = new THREE.Color('#8a4b1f');
-  out.copy(lo).lerp(hi, t);
+  const u = Math.min(0.9999, Math.max(0, t)) * (RAMP.length - 1), i = Math.floor(u);
+  out.copy(RAMP[i]).lerp(RAMP[i + 1], u - i);
 }
 
 function rebuildMesh() {
@@ -91,21 +88,25 @@ function rebuildMesh() {
   g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(mesh.positions), 3));
   g.setIndex(new THREE.BufferAttribute(mesh.triangles, 1));
   const col = new Float32Array(info.nv * 3), c = new THREE.Color();
-  for (let i = 0; i < info.nv; i++) { ramp(mesh.scalars ? mesh.scalars[i] : 0.35, c); col[3 * i] = c.r; col[3 * i + 1] = c.g; col[3 * i + 2] = c.b; }
+  for (let i = 0; i < info.nv; i++) { if (mesh.scalars) ramp(mesh.scalars[i], c); else c.set('#3a3a3a'); col[3 * i] = c.r; col[3 * i + 1] = c.g; col[3 * i + 2] = c.b; }
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.computeVertexNormals();
-  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, metalness: 0, transparent: true, opacity: state.result ? 0.45 : 1, depthWrite: !state.result }));
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 1, metalness: 0, transparent: true, opacity: state.result ? 0.4 : 0.92, depthWrite: !state.result }));
   m.name = 'surface';
   groups.mesh.add(m);
+  // faint wireframe of the source triangulation
+  const wire = new THREE.LineSegments(new THREE.WireframeGeometry(g), new THREE.LineBasicMaterial({ color: css('--mx-bone'), transparent: true, opacity: 0.07, depthWrite: false }));
+  wire.raycast = () => {};
+  groups.mesh.add(wire);
   invalidate();
 }
 
 function rebuildSupports() {
   clearGroup(groups.supports);
   if (!state.info) return;
-  const r = state.info.diag * 0.012;
+  const r = state.info.diag * 0.01;
   const geo = new THREE.SphereGeometry(r, 20, 14);
-  const mat = new THREE.MeshStandardMaterial({ color: css('--support'), roughness: 0.5 });
+  const mat = new THREE.MeshBasicMaterial({ color: css('--mx-white') });
   state.supports.forEach((p, i) => {
     const s = new THREE.Mesh(geo, mat);
     s.position.set(p[0], p[1], p[2]); s.userData.supportIndex = i;
@@ -140,7 +141,7 @@ function rebuildResult() {
   clearGroup(groups.rods); clearGroup(groups.secondary); clearGroup(groups.curves);
   const r = state.result;
   if (!r) return;
-  const cT = new THREE.Color(css('--tension')), cC = new THREE.Color(css('--compression')), cS = new THREE.Color(css('--secondary'));
+  const cT = new THREE.Color(DATA.amber), cC = new THREE.Color(DATA.blue), cS = new THREE.Color('#6f6e6b');
   groups.rods.add(rodMesh(r, (e) => r.primary[e], (e) => (r.force[e] >= 0 ? cT : cC)));
   groups.secondary.add(rodMesh(r, (e) => !r.primary[e], () => cS));
   for (const c of r.curves) {
@@ -159,7 +160,7 @@ function rebuildAll() { rebuildMesh(); rebuildSupports(); rebuildResult(); }
 function setStatus(text) { $('status').textContent = text; }
 function showWarnings(list, error) {
   const ul = $('warnings'); ul.replaceChildren();
-  if (error) { const li = document.createElement('li'); li.className = 'error'; li.textContent = error; ul.append(li); }
+  if (error) { const li = document.createElement('li'); li.className = 'error'; li.textContent = String(error).toLowerCase(); ul.append(li); }
   for (const w of list || []) { const li = document.createElement('li'); li.textContent = w; ul.append(li); }
 }
 
@@ -173,20 +174,23 @@ function updateInfo() {
   const { mesh, info, supports } = state;
   $('empty').hidden = !!mesh;
   $('runBtn').disabled = !(mesh && supports.length);
-  if (!mesh) { $('geomInfo').textContent = 'No mesh loaded.'; $('loadInfo').textContent = ''; return; }
+  if (!mesh) { $('readout').textContent = ''; $('geomInfo').textContent = 'no mesh loaded.'; $('loadInfo').textContent = ''; return; }
   const size = [0, 1, 2].map((k) => (info.max[k] - info.min[k]).toFixed(0)).join(' × ');
-  $('geomInfo').textContent = `${info.nv.toLocaleString()} vertices, ${info.nt.toLocaleString()} faces, ${size} mm. ` +
-    `${supports.length} support${supports.length === 1 ? '' : 's'}.` + (mesh.scalars ? '' : ' No vertex colours found: load scalar is 1.0 everywhere.');
+  $('geomInfo').textContent = `${info.nv} vertices / ${info.nt} faces / ${size} mm / ${supports.length} support${supports.length === 1 ? '' : 's'}.` +
+    (mesh.scalars ? '' : ' no vertex colours: load scalar is 1.0 everywhere.');
+  $('readout').textContent = `${state.name || 'mesh'}\nv.${info.nv} f.${info.nt}\n${size} mm`;
   let total = 0;
   for (let v = 0; v < info.nv; v++) total += info.area[v] * (mesh.scalars ? mesh.scalars[v] : 1);
   const P = total * (+$('pressure').value || 0) * 1e-3;
-  $('loadInfo').textContent = `Total load ${P.toFixed(P < 10 ? 2 : 1)} N over ${(info.totalArea / 100).toFixed(1)} cm².`;
+  $('loadInfo').textContent = `total load ${P.toFixed(P < 10 ? 2 : 1)} N over ${(info.totalArea / 100).toFixed(1)} cm².`;
 }
 
-function setMesh(mesh) {
+function setMesh(mesh, name) {
   state.mesh = mesh;
+  state.name = (name || 'mesh').toLowerCase();
   state.info = analyseMesh(mesh.positions, mesh.triangles);
   state.supports = [];
+  $('supportName').textContent = 'none';
   $('down').value = '-' + 'xyz'[state.info.upAxis];
   clearResult(); rebuildSupports(); frameCamera(); updateInfo(); showWarnings([]); setStatus('');
 }
@@ -194,11 +198,11 @@ function setMesh(mesh) {
 async function readFile(input, fn) {
   const f = input.files[0];
   if (!f) return;
-  try { fn(f.name, await f.arrayBuffer()); }
-  catch (err) { showWarnings([], err.message); }
+  try { fn(f.name, await f.arrayBuffer()); $(input.id.replace('File', 'Name')).textContent = f.name.toLowerCase(); }
+  catch (err) { showWarnings([], err.message.toLowerCase()); }
   input.value = '';
 }
-$('meshFile').addEventListener('change', (ev) => readFile(ev.target, (name, buf) => setMesh(loadMesh(name, buf))));
+$('meshFile').addEventListener('change', (ev) => readFile(ev.target, (name, buf) => setMesh(loadMesh(name, buf), name)));
 $('supportFile').addEventListener('change', (ev) => readFile(ev.target, (name, buf) => {
   const pts = loadPoints(name, buf);
   state.supports = [];
@@ -208,8 +212,9 @@ $('supportFile').addEventListener('change', (ev) => readFile(ev.target, (name, b
 $('exampleBtn').addEventListener('click', async () => {
   try {
     const res = await fetch('examples/load_mesh.obj');
-    if (!res.ok) throw new Error('Could not fetch the example mesh.');
-    setMesh(loadMesh('load_mesh.obj', await res.arrayBuffer()));
+    if (!res.ok) throw new Error('example mesh could not be fetched.');
+    setMesh(loadMesh('load_mesh.obj', await res.arrayBuffer()), 'load_mesh.obj');
+    $('meshName').textContent = 'load_mesh.obj';
   } catch (err) { showWarnings([], err.message); }
 });
 $('clearSupports').addEventListener('click', () => { state.supports = []; clearResult(); rebuildSupports(); updateInfo(); });
@@ -233,7 +238,7 @@ canvas.addEventListener('pointerup', (ev) => {
   const hitS = ray.intersectObjects(groups.supports.children)[0];
   if (hitS) state.supports.splice(hitS.object.userData.supportIndex, 1);
   else {
-    const hit = ray.intersectObjects(groups.mesh.children)[0];
+    const hit = ray.intersectObjects(groups.mesh.children.filter((o) => o.isMesh))[0];
     if (!hit) return;
     state.supports.push([hit.point.x, hit.point.y, hit.point.z]);
   }
@@ -260,21 +265,21 @@ function run() {
   const id = ++state.runId;
   const t0 = performance.now();
   $('runBtn').disabled = true; $('progress').hidden = false; $('progress').value = 0;
-  setStatus('Building network…'); showWarnings([]);
+  setStatus('generating...'); showWarnings([]);
   worker.onmessage = (ev) => {
     const msg = ev.data;
     if (msg.id !== state.runId) return;
-    if (msg.type === 'progress') { $('progress').value = msg.it / msg.total; setStatus(`Optimising force densities… ${msg.it} / ${msg.total}`); return; }
+    if (msg.type === 'progress') { $('progress').value = msg.it / msg.total; setStatus(`generating... ${String(msg.it).padStart(4, '0')} / ${msg.total}`); return; }
     $('progress').hidden = true; $('runBtn').disabled = false;
     worker.terminate(); state.worker = null;
     if (msg.type === 'error') { setStatus(''); showWarnings([], msg.message); return; }
     state.result = msg.result;
-    setStatus(`Done in ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
+    setStatus(`done / ${((performance.now() - t0) / 1000).toFixed(1)} s`);
     showWarnings(msg.result.warnings);
     showStats(msg.result);
     rebuildMesh(); rebuildResult();
   };
-  worker.onerror = (ev) => { $('progress').hidden = true; $('runBtn').disabled = false; setStatus(''); showWarnings([], ev.message || 'Worker failed.'); };
+  worker.onerror = (ev) => { $('progress').hidden = true; $('runBtn').disabled = false; setStatus(''); showWarnings([], (ev.message || 'worker failed.').toLowerCase()); };
   worker.postMessage({ id, mesh: { positions: state.mesh.positions, triangles: state.mesh.triangles, scalars: state.mesh.scalars }, supports: Float64Array.from(state.supports.flat()), params: readParams() });
 }
 $('runBtn').addEventListener('click', run);
@@ -282,27 +287,28 @@ $('runBtn').addEventListener('click', run);
 function showStats(r) {
   const s = r.stats, f = (v, d = 1) => v.toFixed(d);
   const rows = [
-    ['Network'],
-    ['Nodes / members', `${s.nodes} / ${s.members}`],
-    ['Shortest member', `${f(s.minLength)} mm`],
-    ['Equilibrium residual', `${s.residual.toExponential(1)} N`],
-    ['Shape'],
-    ['Deviation from surface, RMS', `${f(s.devRms, 2)} mm`],
-    ['Deviation from surface, max', `${f(s.devMax, 2)} mm`],
-    ['Drift along surface, RMS / max', `${f(s.driftRms, 1)} / ${f(s.driftMax, 1)} mm`],
-    ['Forces'],
-    ['Total load', `${f(s.totalLoad, 2)} N`],
-    ['Peak tension', `${f(s.maxTension, 2)} N`],
-    ['Peak compression', `${f(s.maxCompression, 2)} N`],
-    ['Load path Σ|F|·L', `${f(s.loadPath / 1000, 2)} N·m`],
-    ['Sizing'],
-    ['At minimum diameter', `${s.nMin} members`],
-    ['Sized by strength', `${s.nStrength} members`],
-    ['Sized by buckling', `${s.nBuckling} members`],
-    ['Largest diameter', `${f(Math.max(...r.diameter), 2)} mm`],
-    ['Strut volume / mass', `${f(s.volume / 1000, 2)} cm³ / ${f(s.mass, 2)} g`],
-    ['Curves'],
-    ['Primary / secondary', `${s.curvesPrimary} / ${s.curvesSecondary}`],
+    ['network'],
+    ['nodes / members', `${s.nodes} / ${s.members}`],
+    ['shortest member', `${f(s.minLength)} mm`],
+    ['equilibrium residual', `${s.residual.toExponential(1)} N`],
+    ['shape'],
+    ['deviation from surface, rms', `${f(s.devRms, 2)} mm`],
+    ['deviation from surface, max', `${f(s.devMax, 2)} mm`],
+    ['drift along surface, rms / max', `${f(s.driftRms, 1)} / ${f(s.driftMax, 1)} mm`],
+    ['forces'],
+    ['total load', `${f(s.totalLoad, 2)} N`],
+    ['peak tension', `${f(s.maxTension, 2)} N`],
+    ['peak compression', `${f(s.maxCompression, 2)} N`],
+    ['load path Σ|F|·L', `${f(s.loadPath / 1000, 2)} N·m`],
+    ['sizing'],
+    ['at minimum diameter', `${s.nMin}`],
+    ['sized by strength', `${s.nStrength}`],
+    ['sized by buckling', `${s.nBuckling}`],
+    ['largest diameter', `${f(Math.max(...r.diameter), 2)} mm`],
+    ['strut volume', `${f(s.volume / 1000, 2)} cm³`],
+    ['strut mass', `${f(s.mass, 2)} g`],
+    ['curves'],
+    ['primary / secondary', `${s.curvesPrimary} / ${s.curvesSecondary}`],
   ];
   const table = $('stats'); table.replaceChildren();
   for (const row of rows) {
@@ -322,10 +328,10 @@ function download(name, text, type = 'text/plain') {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 const opt = () => ({ includeSecondary: $('incSecondary').checked });
-$('expIges').addEventListener('click', () => download('form-finding-splines.igs', exportIGES(state.result, opt())));
-$('expIgesPoly').addEventListener('click', () => download('form-finding-polylines.igs', exportIGES(state.result, { ...opt(), polyline: true })));
-$('expCsv').addEventListener('click', () => download('form-finding-curves.csv', exportCSV(state.result, opt()), 'text/csv'));
-$('expJson').addEventListener('click', () => download('form-finding.json', exportJSON(state.result), 'application/json'));
+$('expIges').addEventListener('click', () => download('form_finder.splines.igs', exportIGES(state.result, opt())));
+$('expIgesPoly').addEventListener('click', () => download('form_finder.polylines.igs', exportIGES(state.result, { ...opt(), polyline: true })));
+$('expCsv').addEventListener('click', () => download('form_finder.curves.csv', exportCSV(state.result, opt()), 'text/csv'));
+$('expJson').addEventListener('click', () => download('form_finder.json', exportJSON(state.result), 'application/json'));
 
 // hooks for automated checks
 window.__app = { state, run, setSupports(list) { state.supports = list; clearResult(); rebuildSupports(); updateInfo(); } };
