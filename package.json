@@ -1,0 +1,11 @@
+{
+  "name": "structural-form-finding",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-based funicular form-finding (force-density method) for additively manufactured rib structures",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node --test test/*.test.js"
+  }
+}
