@@ -137,19 +137,49 @@ function rodMesh(result, select, colourOf) {
   return inst;
 }
 
+// ribs: boxes hanging below the surface, width in the surface, depth along the normal
+function ribMesh(result, select, colourOf) {
+  const { x, below, network: { edges }, width, depth } = result;
+  const idx = [];
+  for (let e = 0; e < depth.length; e++) if (select(e)) idx.push(e);
+  const inst = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.05 }), idx.length);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3(), mid = new THREE.Vector3(), mtx = new THREE.Matrix4();
+  idx.forEach((e, k) => {
+    const i = edges[2 * e], j = edges[2 * e + 1];
+    a.fromArray(x, 3 * i); b.fromArray(x, 3 * j);
+    X.subVectors(b, a); const len = X.length(); X.divideScalar(len);
+    Z.set(below[3 * i] + below[3 * j], below[3 * i + 1] + below[3 * j + 1], below[3 * i + 2] + below[3 * j + 2]);
+    Z.addScaledVector(X, -Z.dot(X)).normalize();
+    Y.crossVectors(Z, X);
+    mid.addVectors(a, b).multiplyScalar(0.5).addScaledVector(Z, depth[e] / 2);
+    mtx.makeBasis(X.clone().multiplyScalar(len), Y.clone().multiplyScalar(width[e]), Z.clone().multiplyScalar(depth[e])).setPosition(mid);
+    inst.setMatrixAt(k, mtx);
+    inst.setColorAt(k, colourOf(e));
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  return inst;
+}
+
 function rebuildResult() {
   clearGroup(groups.rods); clearGroup(groups.secondary); clearGroup(groups.curves);
   const r = state.result;
   if (!r) return;
   const cT = new THREE.Color(DATA.amber), cC = new THREE.Color(DATA.blue), cS = new THREE.Color('#6f6e6b');
-  groups.rods.add(rodMesh(r, (e) => r.primary[e], (e) => (r.force[e] >= 0 ? cT : cC)));
-  groups.secondary.add(rodMesh(r, (e) => !r.primary[e], () => cS));
+  const build = r.method === 'ribs' ? ribMesh : rodMesh;
+  groups.rods.add(build(r, (e) => r.primary[e], (e) => (r.force[e] >= 0 ? cT : cC)));
+  groups.secondary.add(build(r, (e) => !r.primary[e], () => cS));
   for (const c of r.curves) {
     const pts = sampleBSpline(c.curve, 8);
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pts, 3));
     const colour = c.tier === 'secondary' ? cS : c.force >= 0 ? cT : cC;
     groups.curves.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: colour })));
+    if (c.lowerCurve) {
+      const g2 = new THREE.BufferGeometry();
+      g2.setAttribute('position', new THREE.BufferAttribute(sampleBSpline(c.lowerCurve, 8), 3));
+      groups.curves.add(new THREE.Line(g2, new THREE.LineBasicMaterial({ color: colour, transparent: true, opacity: 0.45 })));
+    }
   }
   invalidate();
 }
@@ -224,6 +254,12 @@ $('pickBtn').addEventListener('click', () => {
   canvas.classList.toggle('picking', state.picking);
 });
 $('down').addEventListener('change', () => { frameCamera(); clearResult(); });
+function syncMethod() {
+  const m = $('method').value;
+  for (const el of document.querySelectorAll('[data-m]')) el.hidden = el.dataset.m !== m;
+}
+$('method').addEventListener('change', () => { syncMethod(); clearResult(); });
+syncMethod();
 $('pressure').addEventListener('input', updateInfo);
 
 // click to add a support on the surface, click an existing support to remove it
@@ -252,6 +288,7 @@ for (const [id, g] of [['showMesh', 'mesh'], ['showRods', 'rods'], ['showSeconda
 function readParams() {
   const v = (id) => +$(id).value;
   return {
+    method: $('method').value, maxDepth: v('maxDepth'), maxAspect: v('maxAspect'),
     down: downVector(), pressure: v('pressure'), spacing: v('spacing'), mode: $('mode').value,
     lambda: Math.pow(10, v('lambda')), maxIter: v('iters'), threshold: v('threshold') / 100, maxTurn: v('maxTurn'),
     material: { strength: v('strength'), modulus: v('modulus'), density: v('density'), safety: v('safety'), minDiameter: v('minDia'), minOpening: v('minOpen') },
@@ -269,7 +306,7 @@ function run() {
   worker.onmessage = (ev) => {
     const msg = ev.data;
     if (msg.id !== state.runId) return;
-    if (msg.type === 'progress') { $('progress').value = msg.it / msg.total; setStatus(`generating... ${String(msg.it).padStart(4, '0')} / ${msg.total}`); return; }
+    if (msg.type === 'progress') { $('progress').value = msg.it / msg.total; setStatus(`generating... ${String(msg.it).padStart(String(msg.total).length, '0')} / ${msg.total}`); return; }
     $('progress').hidden = true; $('runBtn').disabled = false;
     worker.terminate(); state.worker = null;
     if (msg.type === 'error') { setStatus(''); showWarnings([], msg.message); return; }
@@ -286,7 +323,27 @@ $('runBtn').addEventListener('click', run);
 
 function showStats(r) {
   const s = r.stats, f = (v, d = 1) => v.toFixed(d);
-  const rows = [
+  const rows = r.method === 'ribs' ? [
+    ['network'],
+    ['nodes / members', `${s.nodes} / ${s.members}`],
+    ['shortest member', `${f(s.minLength)} mm`],
+    ['deviation from surface', '0.00 mm'],
+    ['response'],
+    ['total load', `${f(s.totalLoad, 2)} N`],
+    ['peak deflection', `${f(s.dispMax, 2)} mm`],
+    ['peak stress / allowable', `${f(s.utilisationMax * 100, 0)} %`],
+    ['sizing'],
+    ['deepest rib', `${f(s.depthMax, 2)} mm`],
+    ['widest rib', `${f(s.widthMax, 2)} mm`],
+    ['at minimum section', `${s.nMin}`],
+    ['sized by stress', `${s.nStrength}`],
+    ['sized by buckling', `${s.nBuckling}`],
+    ['at depth limit', `${s.nCapped}`],
+    ['rib volume', `${f(s.volume / 1000, 2)} cm³`],
+    ['rib mass', `${f(s.mass, 2)} g`],
+    ['curves'],
+    ['primary / secondary', `${s.curvesPrimary} / ${s.curvesSecondary}`],
+  ] : [
     ['network'],
     ['nodes / members', `${s.nodes} / ${s.members}`],
     ['shortest member', `${f(s.minLength)} mm`],
@@ -317,6 +374,9 @@ function showStats(r) {
     else for (const cell of row) { const td = document.createElement('td'); td.textContent = cell; tr.append(td); }
     table.append(tr);
   }
+  $('exportInfo').textContent = r.method === 'ribs'
+    ? 'iges levels: 1 primary / 2 secondary curves on the surface, 3 supports, 4 / 5 the lower edge of each rib in the same order. loft a surface curve to its lower edge for the rib. labels: h = largest depth, w = largest width. csv lists depth at every node.'
+    : 'iges levels: 1 primary / 2 secondary / 3 supports. red = tension, blue = compression. each curve is labelled with its largest diameter. csv rows follow the same order.';
   $('resultsSection').hidden = false; $('exportSection').hidden = false;
 }
 

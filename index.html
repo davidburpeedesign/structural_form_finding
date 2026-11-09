@@ -18,7 +18,7 @@
   <header>
     <span class="wordmark">MORPHXGEN</span>
     <h1>form_finder</h1>
-    <p>funicular member layouts. force-density method.</p>
+    <p>rib networks on a loaded surface. sized where the load asks.</p>
   </header>
 
   <section>
@@ -57,16 +57,25 @@
     <div class="grid">
       <label for="spacing">node spacing</label>
       <span class="unit"><input type="number" id="spacing" value="8" min="3" step="0.5"><i>mm</i></span>
-      <label for="mode">member action</label>
-      <select id="mode">
+      <label for="method">method</label>
+      <select id="method">
+        <option value="ribs">ribs on surface</option>
+        <option value="funicular">funicular net</option>
+      </select>
+      <label for="maxDepth" data-m="ribs">max rib depth</label>
+      <span class="unit" data-m="ribs"><input type="number" id="maxDepth" value="20" min="1" step="1"><i>mm</i></span>
+      <label for="maxAspect" data-m="ribs">max depth / width</label>
+      <span class="unit" data-m="ribs"><input type="number" id="maxAspect" value="6" min="1" max="20" step="0.5"><i></i></span>
+      <label for="mode" data-m="funicular">member action</label>
+      <select id="mode" data-m="funicular">
         <option value="mixed">tension + compression</option>
         <option value="tension">tension only</option>
         <option value="compression">compression only</option>
       </select>
-      <label for="lambda">follow surface / save material</label>
-      <input type="range" id="lambda" min="-3" max="0.5" step="0.05" value="-1">
-      <label for="iters">iterations</label>
-      <input type="number" id="iters" value="600" min="20" max="5000" step="20">
+      <label for="lambda" data-m="funicular">follow surface / save material</label>
+      <input type="range" id="lambda" min="-3" max="0.5" step="0.05" value="-1" data-m="funicular">
+      <label for="iters" data-m="funicular">iterations</label>
+      <input type="number" id="iters" value="600" min="20" max="5000" step="20" data-m="funicular">
     </div>
   </section>
 
@@ -82,7 +91,7 @@
       <span class="unit"><input type="number" id="density" value="1.09" min="0.1" step="0.01"><i>g/cm³</i></span>
       <label for="safety">safety factor</label>
       <span class="unit"><input type="number" id="safety" value="3" min="1" step="0.1"><i></i></span>
-      <label for="minDia">min rod diameter</label>
+      <label for="minDia">min width / diameter</label>
       <span class="unit"><input type="number" id="minDia" value="1" min="0.5" step="0.1"><i>mm</i></span>
       <label for="minOpen">min opening</label>
       <span class="unit"><input type="number" id="minOpen" value="2.5" min="0" step="0.1"><i>mm</i></span>
@@ -92,7 +101,7 @@
   <section>
     <h2><span>05</span> curves</h2>
     <div class="grid">
-      <label for="threshold">primary if force ≥</label>
+      <label for="threshold">primary if ≥</label>
       <span class="unit"><input type="number" id="threshold" value="15" min="0" max="100" step="1"><i>% peak</i></span>
       <label for="maxTurn">split if turn &gt;</label>
       <span class="unit"><input type="number" id="maxTurn" value="50" min="5" max="90" step="5"><i>°</i></span>
@@ -120,7 +129,7 @@
       <button id="expCsv" type="button" class="tick">curves.csv</button>
       <button id="expJson" type="button" class="tick">all.json</button>
     </div>
-    <p class="info">iges levels: 1 primary / 2 secondary / 3 supports. red = tension, blue = compression. each curve is labelled with its largest diameter. csv rows follow the same order.</p>
+    <p class="info" id="exportInfo"></p>
   </section>
 </aside>
 

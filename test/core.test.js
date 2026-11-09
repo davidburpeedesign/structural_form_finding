@@ -8,6 +8,7 @@ import { interpolateBSpline, evalBSpline, chainMembers } from '../js/splines.js'
 import { sizeMembers, DEFAULT_MATERIAL } from '../js/sizing.js';
 import { writeIGES } from '../js/iges.js';
 import { runPipeline, exportIGES, exportCSV, exportJSON } from '../js/pipeline.js';
+import { Frame, sizeSection, ribStress } from '../js/frame.js';
 import { exampleMesh, exampleNetwork, supportsAt } from './fixtures.js';
 
 const enc = (s) => new TextEncoder().encode(s).buffer;
@@ -186,7 +187,7 @@ for (const mode of ['mixed', 'tension', 'compression']) {
     const sup = supportsAt(mesh, info, [[0.3, 0.15], [0.7, 0.15], [0.3, 0.5], [0.7, 0.5], [0.3, 0.85], [0.7, 0.85]]);
     const pts = new Float64Array(sup.length * 3);
     sup.forEach((v, i) => pts.set(mesh.positions.subarray(3 * v, 3 * v + 3), 3 * i));
-    const r = runPipeline(mesh, pts, { spacing: 12, pressure: 10, mode, maxIter: 200 });
+    const r = runPipeline(mesh, pts, { method: 'funicular', spacing: 12, pressure: 10, mode, maxIter: 200 });
     const s = r.stats;
     assert.ok(s.exact);
     assert.ok(s.residual < 1e-6 * s.totalLoad, `residual ${s.residual}`);
@@ -215,3 +216,63 @@ for (const mode of ['mixed', 'tension', 'compression']) {
     assert.equal(JSON.parse(exportJSON(r)).members.length, s.members);
   });
 }
+
+test('frame: cantilever deflections and root moment match beam theory', () => {
+  const ne = 10, L = 100, E = 3500, b = 2, h = 5, P = 1;
+  const nodes = new Float64Array(3 * (ne + 1)), edges = new Uint32Array(2 * ne), normals = new Float64Array(3 * (ne + 1)), fixed = new Uint8Array(ne + 1);
+  for (let i = 0; i <= ne; i++) { nodes[3 * i] = (i * L) / ne; normals[3 * i + 2] = 1; }
+  for (let e = 0; e < ne; e++) { edges[2 * e] = e; edges[2 * e + 1] = e + 1; }
+  fixed[0] = 1;
+  const fr = new Frame(nodes, edges, normals, fixed, true);
+  const loads = new Float64Array(3 * (ne + 1));
+  loads[3 * ne] = P; loads[3 * ne + 1] = P; loads[3 * ne + 2] = -P;
+  const r = fr.solve(new Float64Array(ne).fill(b), new Float64Array(ne).fill(h), loads, E);
+  const u = fr.displacement(ne), close = (a, e) => assert.ok(Math.abs(a - e) < 1e-5 * Math.abs(e), `${a} vs ${e}`);
+  close(u[0], (P * L) / (E * b * h));
+  close(u[1], (P * L ** 3) / (3 * E * ((h * b ** 3) / 12)));   // across the width: weak axis
+  close(u[2], (-P * L ** 3) / (3 * E * ((b * h ** 3) / 12)));  // along the depth: strong axis
+  close(r.My[0], P * L); close(r.Mz[0], P * L); close(r.N[0], P);
+});
+
+test('rib sizing: depth first, width follows, depth cap widens, buckling', () => {
+  const lim = { sigma: 12, minWidth: 1, minDepth: 1, maxDepth: 20, maxAspect: 6, E: 3500, safety: 3 };
+  assert.deepEqual(sizeSection(0.1, 0, 0, 10, lim), { b: 1, h: 1, governs: 0 });
+  const s = sizeSection(0, 50, 0, 10, lim); // pure bending: 6M / (b h^2) = sigma with b = 1
+  assert.equal(s.governs, 1); assert.equal(s.b, 1); assert.ok(Math.abs(s.h - 5) < 1e-6);
+  const deep = sizeSection(0, 2000, 0, 10, lim);
+  assert.ok(Math.abs(deep.b - deep.h / 6) < 1e-9 && Math.abs(ribStress(0, 2000, 0, deep.b, deep.h) - 12) < 1e-6);
+  const cap = sizeSection(0, 1e5, 0, 10, lim);
+  assert.equal(cap.governs, 3); assert.equal(cap.h, 20); assert.ok(Math.abs(ribStress(0, 1e5, 0, cap.b, cap.h) - 12) < 1e-6);
+  const bk = sizeSection(-5, 0, 0, 60, lim);
+  assert.equal(bk.governs, 2);
+  assert.ok((Math.PI ** 2 * 3500 * (Math.max(bk.b, bk.h) * Math.min(bk.b, bk.h) ** 3) / 12) / 60 ** 2 >= 15 * (1 - 1e-9));
+});
+
+test('pipeline (ribs): nodes stay on the surface, stresses within limit, exports', () => {
+  const { mesh, info } = exampleMesh();
+  const sup = supportsAt(mesh, info, [[0.3, 0.15], [0.7, 0.15], [0.3, 0.5], [0.7, 0.5], [0.3, 0.85], [0.7, 0.85]]);
+  const pts = new Float64Array(sup.length * 3);
+  sup.forEach((v, i) => pts.set(mesh.positions.subarray(3 * v, 3 * v + 3), 3 * i));
+  const r = runPipeline(mesh, pts, { spacing: 12, pressure: 10 });
+  assert.equal(r.method, 'ribs');
+  // every node is a vertex of the design mesh
+  const key = (p, i) => `${p[3 * i]},${p[3 * i + 1]},${p[3 * i + 2]}`;
+  const verts = new Set(); for (let i = 0; i < info.nv; i++) verts.add(key(mesh.positions, i));
+  for (let i = 0; i < r.stats.nodes; i++) assert.ok(verts.has(key(r.x, i)));
+  assert.ok(r.stats.utilisationMax < 1.05, `utilisation ${r.stats.utilisationMax}`);
+  assert.ok(r.depth.every((h) => h >= 1 && h <= 20 + 1e-9) && r.width.every((b) => b >= 1));
+  assert.ok(r.depth.every((h, e) => h / r.width[e] <= 6 + 1e-6));
+  assert.ok(r.stats.depthMax > 2, 'bending should demand depth somewhere');
+  // ribs hang on the side the load pushes towards (-y here)
+  for (let i = 0; i < r.stats.nodes; i++) assert.ok(r.below[3 * i + 1] < 0);
+  for (const c of r.curves) {
+    assert.equal(c.depths.length, c.nodes.length);
+    c.nodes.forEach((nd, j) => { const d = Math.hypot(c.lowerPoints[3 * j] - r.x[3 * nd], c.lowerPoints[3 * j + 1] - r.x[3 * nd + 1], c.lowerPoints[3 * j + 2] - r.x[3 * nd + 2]); assert.ok(Math.abs(d - c.depths[j]) < 1e-9); });
+  }
+  const igs = exportIGES(r).split('\n').filter(Boolean);
+  assert.ok(igs.every((l) => l.length === 80));
+  assert.equal(igs.filter((l) => l[72] === 'D').length / 2, 2 * r.curves.length + r.network.nSupports);
+  assert.equal(exportCSV(r).trim().split('\n').length, r.curves.length + 1);
+  const j = JSON.parse(exportJSON(r));
+  assert.equal(j.members.length, r.stats.members); assert.ok(j.members[0].depth >= 1 && j.curves[0].depths.length === j.curves[0].nodes.length);
+});

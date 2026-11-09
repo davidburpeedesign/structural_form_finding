@@ -155,13 +155,14 @@ export function sampleBSpline(curve, perSpan = 8) {
 /**
  * Full extraction. Returns curves with per-curve engineering attributes.
  * @param threshold fraction of the largest member force below which a member is "secondary"
+ * @param primaryMask optional Uint8Array(m) that decides primary/secondary instead of the force threshold
  */
-export function extractSplines(x, edges, fixed, force, diameter, length, threshold, maxTurnDeg = 50) {
+export function extractSplines(x, edges, fixed, force, diameter, length, threshold, maxTurnDeg = 50, primaryMask = null) {
   const m = edges.length / 2;
   let fmax = 0;
   for (let e = 0; e < m; e++) fmax = Math.max(fmax, Math.abs(force[e]));
   const primary = new Uint8Array(m), secondary = new Uint8Array(m);
-  for (let e = 0; e < m; e++) (Math.abs(force[e]) >= threshold * fmax ? primary : secondary)[e] = 1;
+  for (let e = 0; e < m; e++) ((primaryMask ? primaryMask[e] : Math.abs(force[e]) >= threshold * fmax) ? primary : secondary)[e] = 1;
   const build = (keep, tier) =>
     chainMembers(x, edges, keep, fixed, maxTurnDeg).map((ch) => {
       const pts = new Float64Array(3 * ch.nodes.length);
