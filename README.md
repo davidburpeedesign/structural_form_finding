@@ -21,7 +21,14 @@ Browsers will not load ES modules from `file://`, so serve the folder:
 python3 -m http.server 8080
 ```
 
-Then open <http://localhost:8080>. Any static host works, including GitHub Pages.
+Then open <http://localhost:8080>.
+
+### GitHub Pages
+
+`.github/workflows/pages.yml` runs the tests and publishes the site on every push to `main` or
+`claude/exciting-hamilton-qoji84`. It needs one setting, once: **Settings → Pages → Build and
+deployment → Source: GitHub Actions**. The site then appears at
+<https://davidburpeedesign.github.io/structural_form_finding/>.
 
 ```bash
 npm test
